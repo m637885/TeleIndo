@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { useTdwebStore } from './useTdwebStore';
 import Pusher from 'pusher-js';
+import { Api } from 'telegram';
+import { NewMessage } from 'telegram/events';
+
+import bigInt from 'big-integer';
 
 interface AppState {
   sessionString: string | null;
@@ -34,6 +38,7 @@ interface AppState {
   getMessages: (entityId: string) => void;
   getContacts: () => void;
   createGroup: (title: string, userIds: string[]) => void;
+  importContact: (phone: string, firstName: string, lastName: string) => void;
   
   // Video Call Actions
   setIncomingCall: (call: AppState['incomingCall']) => void;
@@ -72,7 +77,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     channel.bind('callAccepted', (data: { signal: any }) => {
       set({ callAccepted: true });
-      // The component will handle the signal via a custom event or store subscription
       window.dispatchEvent(new CustomEvent('pusherCallAccepted', { detail: data.signal }));
     });
 
@@ -85,17 +89,63 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   initSocket: (isTestServer?: boolean) => {
     const tdwebStore = useTdwebStore.getState();
-    if (tdwebStore.client) return; // Already initialized
+    if (tdwebStore.client) return;
     
     tdwebStore.initClient(isTestServer);
     
-    // Sync authStep, error, and userId from tdwebStore to appStore
     useTdwebStore.subscribe((state) => {
       set({ authStep: state.authStep, error: state.error, userId: state.userId });
       
-      // Initialize Pusher once authenticated and we have a user ID
-      if (state.authStep === 'authenticated' && state.userId && !get().pusher) {
-        get().initPusher(state.userId);
+      if (state.authStep === 'authenticated' && state.userId) {
+        if (!get().pusher) {
+          get().initPusher(state.userId);
+        }
+        
+        // Load initial data
+        const client = state.client;
+        if (client && get().dialogs.length === 0) {
+          // Fetch dialogs
+          client.getDialogs({ limit: 20 }).then((dialogs: any[]) => {
+            const formattedDialogs = dialogs.map(d => ({
+              id: d.id.toString(),
+              title: d.title,
+              date: d.date,
+              message: d.message?.message || '',
+              unreadCount: d.unreadCount,
+              isGroup: d.isGroup,
+              isChannel: d.isChannel
+            }));
+            set({ dialogs: formattedDialogs });
+          }).catch(console.error);
+
+          // Fetch contacts
+          get().getContacts();
+
+          // Listen for new messages
+          client.addEventHandler((event: any) => {
+            const message = event.message;
+            if (message) {
+              const chatId = message.chatId?.toString();
+              if (chatId) {
+                set((prev) => {
+                  const currentMessages = prev.messages[chatId] || [];
+                  const newMessage = {
+                    id: message.id,
+                    out: message.out,
+                    message: message.message,
+                    date: message.date,
+                  };
+                  return {
+                    messages: {
+                      ...prev.messages,
+                      [chatId]: [newMessage, ...currentMessages]
+                    }
+                  };
+                });
+              }
+            }
+          }, new NewMessage({}));
+        }
       }
     });
   },
@@ -106,27 +156,116 @@ export const useAppStore = create<AppState>((set, get) => ({
   
   setActiveDialog: (id) => {
     set({ activeDialogId: id });
-    // TODO: implement with tdweb
+    get().getMessages(id);
   },
 
   submitPhone: (phone) => useTdwebStore.getState().submitPhone(phone),
   submitCode: (code) => useTdwebStore.getState().submitCode(code),
   submitPassword: (password) => useTdwebStore.getState().submitPassword(password),
   
-  sendMessage: (message) => {
-    // TODO: implement with tdweb
+  sendMessage: async (message) => {
+    const { activeDialogId } = get();
+    const client = useTdwebStore.getState().client;
+    if (!client || !activeDialogId) return;
+
+    try {
+      await client.sendMessage(activeDialogId, { message });
+      // The new message event handler will add it to the state
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    }
   },
 
-  getMessages: (entityId) => {
-    // TODO: implement with tdweb
+  getMessages: async (entityId) => {
+    const client = useTdwebStore.getState().client;
+    if (!client) return;
+
+    try {
+      const msgs = await client.getMessages(entityId, { limit: 50 });
+      const formattedMsgs = msgs.map((m: any) => ({
+        id: m.id,
+        out: m.out,
+        message: m.message,
+        date: m.date,
+      }));
+      
+      set((prev) => ({
+        messages: {
+          ...prev.messages,
+          [entityId]: formattedMsgs
+        }
+      }));
+    } catch (err) {
+      console.error('Failed to get messages:', err);
+    }
   },
 
-  getContacts: () => {
-    // TODO: implement with tdweb
+  getContacts: async () => {
+    const client = useTdwebStore.getState().client;
+    if (!client) return;
+
+    try {
+      const result = await client.invoke(new Api.contacts.GetContacts({
+        hash: bigInt(0),
+      }));
+      
+      if (result && 'users' in result) {
+        const contacts = result.users.map((u: any) => ({
+          id: u.id.toString(),
+          firstName: u.firstName,
+          lastName: u.lastName,
+          phone: u.phone,
+        }));
+        set({ contacts });
+      }
+    } catch (err) {
+      console.error('Failed to get contacts:', err);
+    }
   },
 
-  createGroup: (title, userIds) => {
-    // TODO: implement with tdweb
+  createGroup: async (title, userIds) => {
+    const client = useTdwebStore.getState().client;
+    if (!client) return;
+
+    try {
+      await client.invoke(new Api.messages.CreateChat({
+        users: userIds,
+        title: title,
+      }));
+      // Refresh dialogs
+      const dialogs = await client.getDialogs({ limit: 20 });
+      const formattedDialogs = dialogs.map((d: any) => ({
+        id: d.id.toString(),
+        title: d.title,
+        date: d.date,
+        message: d.message?.message || '',
+        unreadCount: d.unreadCount,
+        isGroup: d.isGroup,
+        isChannel: d.isChannel
+      }));
+      set({ dialogs: formattedDialogs });
+    } catch (err) {
+      console.error('Failed to create group:', err);
+    }
+  },
+
+  importContact: async (phone, firstName, lastName) => {
+    const client = useTdwebStore.getState().client;
+    if (!client) return;
+
+    try {
+      await client.invoke(new Api.contacts.ImportContacts({
+        contacts: [new Api.InputPhoneContact({
+          clientId: bigInt(Math.floor(Math.random() * 1000000)),
+          phone: phone,
+          firstName: firstName,
+          lastName: lastName,
+        })]
+      }));
+      get().getContacts();
+    } catch (err) {
+      console.error('Failed to import contact:', err);
+    }
   },
 
   setIncomingCall: (call) => set({ incomingCall: call }),

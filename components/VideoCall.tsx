@@ -23,33 +23,6 @@ export function VideoCall({
   const userVideo = useRef<HTMLVideoElement>(null);
   const connectionRef = useRef<Peer.Instance | null>(null);
 
-  useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((currentStream) => {
-      setStream(currentStream);
-      if (myVideo.current) {
-        myVideo.current.srcObject = currentStream;
-      }
-      
-      if (targetUserId && !incomingCall) {
-        // We are initiating the call
-        callUser(targetUserId, currentStream);
-      }
-    }).catch(err => {
-      console.error("Failed to get media devices", err);
-      alert("Could not access camera/microphone.");
-      onClose();
-    });
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-      if (connectionRef.current) {
-        connectionRef.current.destroy();
-      }
-    };
-  }, []);
-
   const callUser = (idToCall: string, currentStream: MediaStream) => {
     const peer = new Peer({
       initiator: true,
@@ -98,6 +71,33 @@ export function VideoCall({
       window.removeEventListener('pusherCallAccepted', handleCallAccepted);
     };
   };
+
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((currentStream) => {
+      setStream(currentStream);
+      if (myVideo.current) {
+        myVideo.current.srcObject = currentStream;
+      }
+      
+      if (targetUserId && !incomingCall) {
+        // We are initiating the call
+        callUser(targetUserId, currentStream);
+      }
+    }).catch(err => {
+      console.error("Failed to get media devices", err);
+      alert("Could not access camera/microphone.");
+      onClose();
+    });
+
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      if (connectionRef.current) {
+        connectionRef.current.destroy();
+      }
+    };
+  }, [targetUserId, incomingCall, onClose]);
 
   const answerCall = () => {
     if (!incomingCall || !stream) return;

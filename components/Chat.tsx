@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import { VideoCall } from './VideoCall';
 
 export function Chat() {
-  const { dialogs, contacts, messages, activeDialogId, setActiveDialog, sendMessage, createGroup, incomingCall } = useAppStore();
+  const { dialogs, contacts, messages, activeDialogId, setActiveDialog, sendMessage, createGroup, importContact, incomingCall } = useAppStore();
   const [input, setInput] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -27,7 +27,7 @@ export function Chat() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeMessages]);
+  }, [messages, activeDialogId]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +40,7 @@ export function Chat() {
   const handleImportContact = (e: React.FormEvent) => {
     e.preventDefault();
     if (importPhone && importFirstName) {
-      // TODO: implement with tdweb
+      importContact(importPhone, importFirstName, importLastName);
       setShowImportModal(false);
       setImportPhone('');
       setImportFirstName('');

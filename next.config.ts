@@ -2,31 +2,45 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: [
+    'ais-dev-xnulmgffnq2g6nvk5n7qvs-141614207477.asia-east1.run.app',
+    'ais-pre-xnulmgffnq2g6nvk5n7qvs-141614207477.asia-east1.run.app',
+  ],
   typescript: {
     ignoreBuildErrors: false,
   },
-  // Allow access to remote image placeholder.
   images: {
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'picsum.photos',
         port: '',
-        pathname: '/**', // This allows any path under the hostname
+        pathname: '/**',
       },
     ],
   },
   output: 'standalone',
   transpilePackages: ['motion'],
   turbopack: {},
-  webpack: (config, {dev}) => {
-    // HMR is disabled in AI Studio via DISABLE_HMR env var.
-    // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+  webpack: (config, {dev, isServer}) => {
     if (dev && process.env.DISABLE_HMR === 'true') {
       config.watchOptions = {
         ignored: /.*/,
       };
     }
+    
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        crypto: false,
+        path: false,
+        os: false,
+      };
+    }
+    
     return config;
   },
 };
