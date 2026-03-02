@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions';
+import { computeCheck } from 'telegram/Password';
+import { Buffer } from 'buffer';
 
 interface TdwebState {
   client: TelegramClient | null;
@@ -117,16 +119,16 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
     if (!client) return;
 
     try {
-      await client.signInWithPassword({
-        apiId: Number(process.env.NEXT_PUBLIC_TELEGRAM_API_ID || 2040),
-        apiHash: process.env.NEXT_PUBLIC_TELEGRAM_API_HASH || 'b18441a1ff607e10a989891a5462e627',
-      }, {
-        password: async () => password,
-        onError: (err) => {
-          console.error(err);
-          set({ error: err.message || 'Invalid password' });
-        }
-      });
+      const passwordParams = await client.invoke(new Api.account.GetPassword());
+      const passwordSrp = await computeCheck(passwordParams, password);
+      
+      // Fix Buffer instanceof issue in GramJS
+      passwordSrp.A = Buffer.from(passwordSrp.A);
+      passwordSrp.M1 = Buffer.from(passwordSrp.M1);
+
+      await client.invoke(new Api.auth.CheckPassword({
+        password: passwordSrp
+      }));
       
       const me = await client.getMe();
       localStorage.setItem('telegram_session', (client.session as StringSession).save());
