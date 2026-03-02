@@ -15,6 +15,7 @@ interface TdwebState {
   submitPassword: (password: string) => void;
   setAuthStep: (step: TdwebState['authStep']) => void;
   setError: (error: string | null) => void;
+  logout: () => void;
 }
 
 export const useTdwebStore = create<TdwebState>((set, get) => ({
@@ -46,15 +47,25 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
 
       await client.connect();
 
-      if (await client.checkAuthorization()) {
-        const me = await client.getMe();
-        set({ authStep: 'authenticated', userId: String(me.id), error: null });
-      } else {
-        set({ authStep: 'phone', error: null });
+      try {
+        if (await client.checkAuthorization()) {
+          const me = await client.getMe();
+          set({ authStep: 'authenticated', userId: String(me.id), error: null });
+        } else {
+          set({ authStep: 'phone', error: null });
+        }
+      } catch (authErr: any) {
+        console.error('Auth check error:', authErr);
+        if (authErr.message && authErr.message.includes('AUTH_KEY_UNREGISTERED')) {
+          localStorage.removeItem('telegram_session');
+          set({ authStep: 'phone', error: null });
+        } else {
+          set({ authStep: 'phone', error: null });
+        }
       }
     } catch (err) {
       console.error('Failed to init GramJS:', err);
-      set({ error: 'Failed to initialize Telegram client' });
+      set({ error: 'Failed to initialize Telegram client. Please refresh.' });
     }
   },
 
@@ -63,14 +74,14 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
     if (!client) return;
 
     try {
-      const { phoneCodeHash } = await client.sendCode(
+      const result = await client.sendCode(
         {
           apiId: Number(process.env.NEXT_PUBLIC_TELEGRAM_API_ID || 2040),
           apiHash: process.env.NEXT_PUBLIC_TELEGRAM_API_HASH || 'b18441a1ff607e10a989891a5462e627',
         },
         phone
       );
-      set({ authStep: 'code', phoneCodeHash, phoneNumber: phone, error: null });
+      set({ authStep: 'code', phoneCodeHash: result.phoneCodeHash, phoneNumber: phone, error: null });
     } catch (err: any) {
       console.error('submitPhone error:', err);
       set({ error: err.message || 'Failed to submit phone number' });
@@ -128,4 +139,9 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
 
   setAuthStep: (step) => set({ authStep: step }),
   setError: (error) => set({ error }),
+  logout: () => {
+    localStorage.removeItem('telegram_session');
+    set({ authStep: 'phone', userId: null, error: null, phoneCodeHash: null, phoneNumber: null });
+    window.location.reload();
+  }
 }));
