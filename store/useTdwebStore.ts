@@ -1,10 +1,14 @@
 import { create } from 'zustand';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
 
 interface TdwebState {
-  client: any;
+  client: TelegramClient | null;
   userId: string | null;
   authStep: 'init' | 'phone' | 'code' | 'password' | 'authenticated';
   error: string | null;
+  phoneCodeHash: string | null;
+  phoneNumber: string | null;
   initClient: (isTestServer?: boolean) => void;
   submitPhone: (phone: string) => void;
   submitCode: (code: string) => void;
@@ -18,80 +22,38 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
   userId: null,
   authStep: 'init',
   error: null,
+  phoneCodeHash: null,
+  phoneNumber: null,
 
   initClient: async (isTestServer = false) => {
     if (typeof window === 'undefined') return;
     if (get().client) return;
 
     try {
-      // Use the globally loaded tdweb from the script tag
-      const tdwebObj = (window as any).tdweb;
+      const apiId = Number(process.env.NEXT_PUBLIC_TELEGRAM_API_ID || 2040);
+      const apiHash = process.env.NEXT_PUBLIC_TELEGRAM_API_HASH || 'b18441a1ff607e10a989891a5462e627';
       
-      if (!tdwebObj) {
-        throw new Error('tdweb library not loaded. Please check if /tdweb.js exists in public folder.');
-      }
+      const savedSession = localStorage.getItem('telegram_session') || '';
+      const stringSession = new StringSession(savedSession);
 
-      const TdClient = tdwebObj.default || tdwebObj;
-
-      const client = new TdClient({
-        logVerbosityLevel: 1,
-        jsLogVerbosityLevel: 3,
-        mode: 'wasm',
-        useTestDC: isTestServer,
-        onUpdate: (update: any) => {
-          console.log('tdweb update:', update);
-          
-          if (update['@type'] === 'updateAuthorizationState') {
-            const state = update.authorization_state;
-            
-            if (state['@type'] === 'authorizationStateWaitTdlibParameters') {
-              client.send({
-                '@type': 'setTdlibParameters',
-                parameters: {
-                  use_test_dc: isTestServer,
-                  database_directory: '/tdlib',
-                  files_directory: '/tdlib',
-                  use_file_database: true,
-                  use_chat_info_database: true,
-                  use_message_database: true,
-                  use_secret_chats: false,
-                  api_id: Number(process.env.NEXT_PUBLIC_TELEGRAM_API_ID || 94575),
-                  api_hash: process.env.NEXT_PUBLIC_TELEGRAM_API_HASH || 'a3406de8d171bb422bb6ddf3bbd800e2',
-                  system_language_code: 'en',
-                  device_model: 'Browser',
-                  system_version: navigator.userAgent,
-                  application_version: '1.0.0',
-                  enable_storage_optimizer: true,
-                }
-              });
-            } else if (state['@type'] === 'authorizationStateWaitEncryptionKey') {
-              client.send({
-                '@type': 'checkDatabaseEncryptionKey',
-                encryption_key: ''
-              });
-            } else if (state['@type'] === 'authorizationStateWaitPhoneNumber') {
-              set({ authStep: 'phone', error: null });
-            } else if (state['@type'] === 'authorizationStateWaitCode') {
-              set({ authStep: 'code', error: null });
-            } else if (state['@type'] === 'authorizationStateWaitPassword') {
-              set({ authStep: 'password', error: null });
-            } else if (state['@type'] === 'authorizationStateReady') {
-              set({ authStep: 'authenticated', error: null });
-              
-              // Get the current user ID
-              client.send({ '@type': 'getMe' }).then((me: any) => {
-                set({ userId: String(me.id) });
-              }).catch(console.error);
-            }
-          } else if (update['@type'] === 'updateConnectionState') {
-            console.log('Connection state:', update.state['@type']);
-          }
-        }
+      const client = new TelegramClient(stringSession, apiId, apiHash, {
+        connectionRetries: 5,
+        useWSS: true,
+        testServers: isTestServer,
       });
 
       set({ client });
+
+      await client.connect();
+
+      if (await client.checkAuthorization()) {
+        const me = await client.getMe();
+        set({ authStep: 'authenticated', userId: String(me.id), error: null });
+      } else {
+        set({ authStep: 'phone', error: null });
+      }
     } catch (err) {
-      console.error('Failed to init tdweb:', err);
+      console.error('Failed to init GramJS:', err);
       set({ error: 'Failed to initialize Telegram client' });
     }
   },
@@ -101,10 +63,14 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
     if (!client) return;
 
     try {
-      await client.send({
-        '@type': 'setAuthenticationPhoneNumber',
-        phone_number: phone
-      });
+      const { phoneCodeHash } = await client.sendCode(
+        {
+          apiId: Number(process.env.NEXT_PUBLIC_TELEGRAM_API_ID || 2040),
+          apiHash: process.env.NEXT_PUBLIC_TELEGRAM_API_HASH || 'b18441a1ff607e10a989891a5462e627',
+        },
+        phone
+      );
+      set({ authStep: 'code', phoneCodeHash, phoneNumber: phone, error: null });
     } catch (err: any) {
       console.error('submitPhone error:', err);
       set({ error: err.message || 'Failed to submit phone number' });
@@ -112,17 +78,26 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
   },
 
   submitCode: async (code: string) => {
-    const { client } = get();
-    if (!client) return;
+    const { client, phoneNumber, phoneCodeHash } = get();
+    if (!client || !phoneNumber || !phoneCodeHash) return;
 
     try {
-      await client.send({
-        '@type': 'checkAuthenticationCode',
-        code: code
-      });
+      await client.invoke(new (client as any).api.auth.SignIn({
+        phoneNumber,
+        phoneCodeHash,
+        phoneCode: code,
+      }));
+      
+      const me = await client.getMe();
+      localStorage.setItem('telegram_session', (client.session as StringSession).save());
+      set({ authStep: 'authenticated', userId: String(me.id), error: null });
     } catch (err: any) {
       console.error('submitCode error:', err);
-      set({ error: err.message || 'Invalid code' });
+      if (err.message.includes('SESSION_PASSWORD_NEEDED')) {
+        set({ authStep: 'password', error: null });
+      } else {
+        set({ error: err.message || 'Invalid code' });
+      }
     }
   },
 
@@ -131,10 +106,13 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
     if (!client) return;
 
     try {
-      await client.send({
-        '@type': 'checkAuthenticationPassword',
-        password: password
-      });
+      await client.invoke(new (client as any).api.auth.CheckPassword({
+        password: await client.computeCheckPasswordAlgo(password)
+      }));
+      
+      const me = await client.getMe();
+      localStorage.setItem('telegram_session', (client.session as StringSession).save());
+      set({ authStep: 'authenticated', userId: String(me.id), error: null });
     } catch (err: any) {
       console.error('submitPassword error:', err);
       set({ error: err.message || 'Invalid password' });

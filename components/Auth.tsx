@@ -15,7 +15,14 @@ export function Auth() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (authStep === 'phone' && phone) submitPhone(phone);
+    if (authStep === 'phone' && phone) {
+      // Ensure phone number starts with + and has no spaces
+      let formattedPhone = phone.replace(/\s+/g, '');
+      if (!formattedPhone.startsWith('+')) {
+        formattedPhone = '+' + formattedPhone;
+      }
+      submitPhone(formattedPhone);
+    }
     if (authStep === 'code' && code) submitCode(code);
     if (authStep === 'password' && password) submitPassword(password);
   };
@@ -109,6 +116,8 @@ export function Auth() {
                 placeholder="Code"
                 className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
                 autoFocus
+                maxLength={5}
+                pattern="\d*"
               />
             </div>
           )}
