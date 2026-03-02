@@ -84,7 +84,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   initSocket: (isTestServer?: boolean) => {
-    useTdwebStore.getState().initClient(isTestServer);
+    const tdwebStore = useTdwebStore.getState();
+    if (tdwebStore.client) return; // Already initialized
+    
+    tdwebStore.initClient(isTestServer);
     
     // Sync authStep, error, and userId from tdwebStore to appStore
     useTdwebStore.subscribe((state) => {

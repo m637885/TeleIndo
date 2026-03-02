@@ -20,7 +20,19 @@ export function Auth() {
     if (authStep === 'password' && password) submitPassword(password);
   };
 
-  if (authStep === 'init' || authStep === 'authenticated') return null;
+  if (authStep === 'authenticated') return null;
+
+  if (authStep === 'init') {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 p-4">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 flex flex-col items-center justify-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-slate-500">Initializing Telegram Client...</p>
+          {error && <p className="text-red-500 mt-4 text-sm text-center">{error}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-slate-50 p-4">

@@ -20,11 +20,18 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
   error: null,
 
   initClient: async (isTestServer = false) => {
+    if (typeof window === 'undefined') return;
     if (get().client) return;
 
     try {
-      // We need to dynamically import tdweb because it's a browser-only library
-      const TdClient = (await import('tdweb')).default;
+      // Use the globally loaded tdweb from the script tag
+      const tdwebObj = (window as any).tdweb;
+      
+      if (!tdwebObj) {
+        throw new Error('tdweb library not loaded. Please check if /tdweb.js exists in public folder.');
+      }
+
+      const TdClient = tdwebObj.default || tdwebObj;
 
       const client = new TdClient({
         logVerbosityLevel: 1,
