@@ -1,0 +1,5 @@
+{
+  "name": "TeleIndo",
+  "description": "A 3rd party Telegram web client supporting Chat, Video Call, Import Contacts, and Group Chat.",
+  "requestFramePermissions": []
+}
