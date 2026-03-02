@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { TelegramClient } from 'telegram';
+import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 
 interface TdwebState {
@@ -82,7 +82,7 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
     if (!client || !phoneNumber || !phoneCodeHash) return;
 
     try {
-      await client.invoke(new (client as any).api.auth.SignIn({
+      await client.invoke(new Api.auth.SignIn({
         phoneNumber,
         phoneCodeHash,
         phoneCode: code,
@@ -93,7 +93,7 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
       set({ authStep: 'authenticated', userId: String(me.id), error: null });
     } catch (err: any) {
       console.error('submitCode error:', err);
-      if (err.message.includes('SESSION_PASSWORD_NEEDED')) {
+      if (err.message && err.message.includes('SESSION_PASSWORD_NEEDED')) {
         set({ authStep: 'password', error: null });
       } else {
         set({ error: err.message || 'Invalid code' });
@@ -106,9 +106,16 @@ export const useTdwebStore = create<TdwebState>((set, get) => ({
     if (!client) return;
 
     try {
-      await client.invoke(new (client as any).api.auth.CheckPassword({
-        password: await client.computeCheckPasswordAlgo(password)
-      }));
+      await client.signInWithPassword({
+        apiId: Number(process.env.NEXT_PUBLIC_TELEGRAM_API_ID || 2040),
+        apiHash: process.env.NEXT_PUBLIC_TELEGRAM_API_HASH || 'b18441a1ff607e10a989891a5462e627',
+      }, {
+        password: async () => password,
+        onError: (err) => {
+          console.error(err);
+          set({ error: err.message || 'Invalid password' });
+        }
+      });
       
       const me = await client.getMe();
       localStorage.setItem('telegram_session', (client.session as StringSession).save());
